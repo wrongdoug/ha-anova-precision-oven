@@ -1,0 +1,124 @@
+"""Config flow for Anova Precision Oven integration."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import ssl
+from typing import Any
+from urllib.parse import urlencode
+
+import voluptuous as vol
+import websockets
+
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
+from homeassistant.exceptions import HomeAssistantError
+
+from .const import ACCESSORIES_APO, CONF_TOKEN, DOMAIN, WS_ENDPOINT
+
+_LOGGER = logging.getLogger(__name__)
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_TOKEN): str,
+    }
+)
+
+
+async def validate_token(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+    """Validate the user input allows us to connect."""
+    token = data[CONF_TOKEN].strip() if isinstance(data[CONF_TOKEN], str) else ""
+
+    if not token:
+        raise InvalidToken("Token cannot be empty")
+
+    if not token.startswith("anova-"):
+        raise InvalidToken("Token must start with 'anova-'")
+
+    if len(token) < 20:
+        raise InvalidToken("Token appears to be invalid or too short")
+
+    params = {
+        "token": token,
+        "supportedAccessories": ACCESSORIES_APO,
+    }
+    url = f"{WS_ENDPOINT}?{urlencode(params)}"
+
+    def _create_ssl_context():
+        return ssl.create_default_context()
+
+    ssl_context = await hass.async_add_executor_job(_create_ssl_context)
+
+    try:
+        websocket = await asyncio.wait_for(
+            websockets.connect(url, ssl=ssl_context),
+            timeout=10,
+        )
+        async with websocket:
+            await asyncio.wait_for(websocket.recv(), timeout=5)
+    except asyncio.TimeoutError as err:
+        _LOGGER.error("Connection timeout during validation")
+        raise CannotConnect("Connection timeout") from err
+    except websockets.exceptions.InvalidStatusCode as err:
+        _LOGGER.error(
+            "Validation failed with status %s", err.status_code
+        )
+        if err.status_code == 401:
+            raise InvalidToken("Invalid or expired token") from err
+        raise CannotConnect(
+            f"Connection failed with status {err.status_code}"
+        ) from err
+    except websockets.exceptions.WebSocketException as err:
+        _LOGGER.error("WebSocket error during validation: %s", type(err).__name__)
+        raise CannotConnect(f"WebSocket error: {type(err).__name__}") from err
+    except Exception as err:
+        _LOGGER.error("Unexpected error during validation: %s", type(err).__name__)
+        raise CannotConnect(f"Unexpected error: {type(err).__name__}") from err
+
+    return {"title": "Anova Precision Oven"}
+
+
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Anova Precision Oven."""
+
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the initial step."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                info = await validate_token(self.hass, user_input)
+            except InvalidToken:
+                errors["base"] = "invalid_token"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                user_input[CONF_TOKEN] = user_input[CONF_TOKEN].strip()
+                token_hash = hashlib.sha256(
+                    user_input[CONF_TOKEN].encode()
+                ).hexdigest()[:16]
+                await self.async_set_unique_id(token_hash)
+                self._abort_if_unique_id_configured()
+
+                return self.async_create_entry(title=info["title"], data=user_input)
+
+        return self.async_show_form(
+            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+
+class InvalidToken(HomeAssistantError):
+    """Error to indicate the token format is invalid."""
+
+
+class CannotConnect(HomeAssistantError):
+    """Error to indicate we cannot connect."""

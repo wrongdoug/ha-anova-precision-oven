@@ -1,0 +1,95 @@
+# Anova Precision Oven for Home Assistant
+
+Home Assistant integration for the Anova Precision Oven (APO) using Anova's [official developer API](https://developer.anovaculinary.com/docs/devices/wifi/oven-commands). Real-time telemetry via WebSocket (`wss://devices.anovaculinary.io`), plus basic control.
+
+> **Provided as-is. No warranty. No expectation of maintenance, support, or future updates.** This is a personal project shared in case it's useful to someone else. You are responsible for verifying correct behavior -- particularly when automating against a physical cooking appliance.
+
+## Scope
+
+Full read-only telemetry for the oven (22 sensors and binary sensors). Limited control: on/off, target temperature, and the lamp. Complex cooking (multi-stage recipes, steam, custom heating element combinations, timer, fan/vent) should be driven from the Anova app. See [Climate Entity Behavior](#climate-entity-behavior) before automating against the climate entity.
+
+### Supported
+
+- Anova Precision Oven v1 (tested)
+- Anova Precision Oven v2 (untested; reads should work, the cook-start path sends extra fields the API docs suggest v2 requires)
+
+### Not Supported
+
+Anova Precision Cooker (APC sous vide circulator). That's a different product with a different API -- use the built-in [Anova integration](https://www.home-assistant.io/integrations/anova) in HA core.
+
+## Entities
+
+### Sensors (17, read-only)
+
+| Entity | Description |
+|---|---|
+| Dry temperature | Current dry bulb temperature |
+| Wet temperature | Current wet bulb temperature |
+| Probe temperature | Meat probe temperature (when connected) |
+| Humidity | Current relative humidity |
+| Timer | Cook timer remaining (seconds) |
+| Mode | `idle` / `preheat` / `cook` |
+| Dry / Wet / Probe temperature setpoint | Target temperatures from whatever cook is running |
+| Humidity setpoint | Target humidity percentage |
+| Fan speed | Current fan speed percentage |
+| Rack position | Current rack position |
+| Timer start type | `Immediately` / `When preheated` / etc. |
+| Heating elements | `Top` / `Bottom` / `Rear` / combinations / `All` / `Off` |
+| Firmware / Hardware version | Diagnostic |
+| Cook session | Current cook session ID or `idle` |
+
+### Binary Sensors (4, read-only)
+
+| Entity | Description |
+|---|---|
+| Connectivity | Online / offline |
+| Door | Open / closed |
+| Water tank | Empty (problem) + `descale_required` attribute |
+| Vent | Open / closed |
+
+### Climate (1)
+
+`OFF` and `HEAT` HVAC modes, target temperature 25-250 C. See [Climate Entity Behavior](#climate-entity-behavior).
+
+### Switch (1)
+
+Lamp on/off.
+
+## Climate Entity Behavior
+
+The climate entity is intentionally simple. Every `turn_on` or temperature change starts a **new single-stage cook** with these fixed parameters:
+
+| Parameter | Value |
+|---|---|
+| Mode | Dry (no steam) |
+| Heating elements | Top on, Bottom off, Rear on |
+| Fan speed | 100% |
+| Humidity setpoint | 0% |
+| Vent | Closed |
+| Timer | None (indefinite) |
+
+`turn_off` sends `CMD_APO_STOP`.
+
+**Caveat:** if a multi-stage or steam cook is in progress (started from the Anova app), changing the HA climate target will **replace** it with the simple dry cook above. Anova's API has no "adjust current cook" command. Treat the climate entity as a "turn on to X" shortcut; use the app for structured recipes.
+
+## Installation
+
+### HACS
+
+1. In HACS, open the three-dot menu and select **Custom repositories**
+2. Add `https://github.com/wrongdoug/ha-anova-precision-oven` as an **Integration**
+3. Install "Anova Precision Oven" and restart HA
+
+### Manual
+
+Copy `custom_components/anova_precision_oven/` into your HA config's `custom_components/` directory and restart.
+
+## Configuration
+
+**Settings > Devices & Services > Add Integration > Anova Precision Oven**, then paste your Personal Access Token (starts with `anova-`).
+
+Tokens are documented in Anova's [authentication guide](https://developer.anovaculinary.com/docs/devices/wifi/authentication). Max 10 PATs per account. WebSocket connections time out after 30 minutes of inactivity; the integration auto-reconnects.
+
+## License
+
+MIT. See `LICENSE`.

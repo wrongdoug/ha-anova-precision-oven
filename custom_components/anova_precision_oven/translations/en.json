@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Anova Precision Oven",
+        "description": "Enter your Anova Personal Access Token",
+        "data": {
+          "token": "Personal Access Token"
+        }
+      }
+    },
+    "error": {
+      "invalid_token": "Invalid token format. Token must start with 'anova-'",
+      "cannot_connect": "Failed to connect to Anova API",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
